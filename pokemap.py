@@ -20,10 +20,17 @@ def main():
   if options.verbose:
     DEBUG_MODE = True
 
-  analyse_rom(args[0], '0x3526A8')
+  bytes = load_rom(args[0])
+  banks = find_banks(bytes, '0x3526A8')
 
-def analyse_rom(rom_path, hex_offset):
-  bytes = open(rom_path, 'rb').read()
+  pallet_town = banks[3][0]
+  read_map(bytes, pallet_town)
+
+
+def load_rom(rom_path):
+  return open(rom_path, 'rb').read()
+
+def find_banks(bytes, hex_offset):
   offset = int(hex_offset, 16)
 
   bank_pointers = []
@@ -51,9 +58,7 @@ def analyse_rom(rom_path, hex_offset):
     debug('Found {} map pointers: {}'.format(len(maps), maps))
     banks.append(maps)
 
-  # Pallet Town
-  pallet_town = banks[3][0]
-  read_map(bytes, pallet_town)
+  return banks
 
 def read_map(bytes, header_pointer):
   map_pointer = read_pointer(bytes, header_pointer)
