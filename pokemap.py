@@ -4,14 +4,21 @@ import struct
 import sys
 from optparse import OptionParser
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 def debug(*args, **kwargs):
   if DEBUG_MODE:
     print(*args, **kwargs)
 
 def main():
   parser = OptionParser(usage="usage: %prog pokemon-rom")
+  parser.add_option("-v", "--verbose",
+    help="Print information while running to help debug", action="store_true",
+    dest="verbose")
   (options, args) = parser.parse_args()
+
+  global DEBUG_MODE
+  if options.verbose:
+    DEBUG_MODE = True
 
   analyse_rom(args[0], '0x3526A8')
 
