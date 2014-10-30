@@ -26,8 +26,27 @@ def main():
   banks = find_banks(bytes, '0x3526A8')
 
   pallet_town = banks[3][0]
-  (tile_splites, header_pointer) = read_map(bytes, pallet_town)
-  draw_tileset(bytes, header_pointer)
+  (tile_sprites, global_pointer, local_pointer) = read_map(bytes, pallet_town)
+  (palettes, tiles, blocks) = read_tileset(bytes, global_pointer)
+  (extra_palettes, extra_tiles, extra_blocks) = read_tileset(bytes, local_pointer)
+  palettes.extend(extra_palettes)
+  tiles.extend(extra_tiles)
+  blocks.extend(extra_blocks)
+
+  pygame.init()
+  screen = pygame.display.set_mode((300, 1000))
+  screen.fill((255, 255, 255))
+
+  for (x, y) in tile_sprites:
+    draw_block(screen, palettes, tiles, blocks, x * 16, y * 16, tile_sprites[(x, y)])
+
+  pygame.display.flip()
+
+  while True:
+    event = pygame.event.wait()
+    if event.type == pygame.QUIT:
+        pygame.quit()
+
 
 def load_rom(rom_path):
   return open(rom_path, 'rb').read()
@@ -69,6 +88,7 @@ def read_map(bytes, header_pointer):
   border = read_pointer(bytes, map_pointer + 8)
   tiles_pointer = read_pointer(bytes, map_pointer + 12)
   tileset_pointer = read_pointer(bytes, map_pointer + 16)
+  local_pointer = read_pointer(bytes, map_pointer + 20)
 
   debug('Map at {}'.format(map_pointer))
   debug('Width/height: {}/{}'.format(width, height))
@@ -91,9 +111,12 @@ def read_map(bytes, header_pointer):
 
       i = i + 1
 
-  return (tile_sprites, tileset_pointer)
+  return (tile_sprites, tileset_pointer, local_pointer)
 
-def draw_tileset(bytes, tileset_pointer):
+def read_tileset(bytes, tileset_pointer):
+  attribs = struct.unpack('<2B', bytes[tileset_pointer:(tileset_pointer + 2)])
+  debug('Tileset compressed: {}, primary: {}'.format(attribs[0], attribs[1]))
+  primary = attribs[1]
   tileset_image_pointer = read_pointer(bytes, tileset_pointer + 4)
   image = nlzss.lzss3.decompress_bytes(bytes[tileset_image_pointer:])
 
@@ -108,10 +131,13 @@ def draw_tileset(bytes, tileset_pointer):
         px = int(px / 0x10)
       tile.append(px)
     tiles.append(tile)
+  debug('Total number of tiles read: {}'.format(len(tiles)))
 
   offset = read_pointer(bytes, tileset_pointer + 8)
+  debug('Palette pointer: {:#x}'.format(offset))
+  palette_range = range(7) if primary == 0 else range(7, 16)
   palettes = []
-  for i in range(16):
+  for i in palette_range:
     palette = []
     for j in range(16):
       colours = \
@@ -124,34 +150,35 @@ def draw_tileset(bytes, tileset_pointer):
     palettes.append(palette)
 
   offset = read_pointer(bytes, tileset_pointer + 12)
+  end = read_pointer(bytes, tileset_pointer + 20)
+  total_blocks = (end - offset) / 16
+  debug('trying to read {} blocks'.format(total_blocks))
   blocks = []
-  for i in range(0x2d8):
-    block = []
-    for j in range(8):
-      block_data = \
-        struct.unpack('<H', bytes[(offset + i * 16 + j * 2):(offset + i * 16 + (j + 1) * 2)])[0]
-      palette = block_data >> 12
-      tile = block_data & 0x3ff
-      attributes = (block_data >> 10) & 0x3
-      block.append((palette, tile, attributes))
+  for i in range(int(total_blocks)):
+    blocks.append(read_block(bytes, offset, i))
 
-    blocks.append(block)
+  return (palettes, tiles, blocks)
 
-  pygame.init()
-  screen = pygame.display.set_mode((300, 1000))
-  screen.fill((255, 255, 255))
+def read_second_blocks(bytes, header_pointer):
+  map_pointer = read_pointer(bytes, header_pointer)
+  tileset_pointer = read_pointer(bytes, map_pointer + 20)
+  offset = read_pointer(bytes, tileset_pointer + 12)
+  blocks = []
+  for i in range(96):
+    b = read_block(bytes, offset, i)
+    blocks.append(b)
+  return blocks
 
-  for i in range(0x2d8):
-    x = i % 8
-    y = int(i / 8)
-    draw_block(screen, palettes, tiles, blocks, x * 16, y * 16, i)
-
-  pygame.display.flip()
-
-  while True:
-    event = pygame.event.wait()
-    if event.type == pygame.QUIT:
-        pygame.quit()
+def read_block(bytes, offset, i):
+  block = []
+  for j in range(8):
+    block_data = \
+      struct.unpack('<H', bytes[(offset + i * 16 + j * 2):(offset + i * 16 + (j + 1) * 2)])[0]
+    palette = block_data >> 12
+    tile = block_data & 0x3ff
+    attributes = (block_data >> 10) & 0x3
+    block.append((palette, tile, attributes))
+  return block
 
 def draw_block(screen, palettes, tiles, blocks, x, y, block_num):
   # The first four tiles are the bottom tiles and the last four are the top
