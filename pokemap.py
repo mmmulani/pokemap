@@ -97,27 +97,6 @@ def draw_tileset(bytes, tileset_pointer):
   tileset_image_pointer = read_pointer(bytes, tileset_pointer + 4)
   image = nlzss.lzss3.decompress_bytes(bytes[tileset_image_pointer:])
 
-  pygame.init()
-  screen = pygame.display.set_mode((300, 1000))
-  screen.fill((255, 255, 255))
-  palette = [
-    (0, 0, 0),
-    (184, 248, 136),
-    (128, 208, 96),
-    (56, 144, 48),
-    (56, 88, 16),
-    (112, 96, 96),
-    (64, 56, 48),
-    (248, 0, 248),
-    (136, 216, 184),
-    (248, 192, 112),
-    (232, 128, 104),
-    (192, 48, 64),
-    (160, 224, 192),
-    (112, 200, 160),
-    (64, 176, 136),
-    (24, 160, 104),
-  ]
   tiles = []
   for i in range(0, len(image), 32):
     tile = []
@@ -130,24 +109,89 @@ def draw_tileset(bytes, tileset_pointer):
       tile.append(px)
     tiles.append(tile)
 
-  w = 2
-  for i, tile in enumerate(tiles):
-    x = (i % 16) * 16
-    y = int(i / 16) * 16
-    for j, px in enumerate(tile):
-      xx = j % 8
-      yy = int(j / 8)
-      colour = palette[px]
-      pygame.draw.rect(screen, colour,
-        (x + xx * w, y + yy * w, w, w))
+  offset = read_pointer(bytes, tileset_pointer + 8)
+  palettes = []
+  for i in range(16):
+    palette = []
+    for j in range(16):
+      colours = \
+      struct.unpack('<H',
+        bytes[(offset + (i * 32) + (j * 2)):\
+          (offset + (i * 32) + ((j + 1) * 2))])[0]
+      (r, g, b) = (colours & 0x1f, (colours >> 5) & 0x1f, colours >> 10)
+      (r, g, b) = (r * 8, g * 8, b * 8)
+      palette.append((r, g, b))
+    palettes.append(palette)
 
-  debug('image length: {}'.format(len(image)))
+  offset = read_pointer(bytes, tileset_pointer + 12)
+  blocks = []
+  for i in range(0x2d8):
+    down = []
+    for j in range(4):
+      block_data = \
+        struct.unpack('<H', bytes[(offset + i * 16 + j * 2):(offset + i * 16 + (j + 1) * 2)])[0]
+      palette = block_data >> 12
+      tile = block_data & 0x3ff
+      attributes = (block_data >> 10) & 0x3
+      down.append((palette, tile, attributes))
+
+    up = []
+    for j in range(4, 8):
+      block_data = \
+        struct.unpack('<H', bytes[(offset + i * 16 + j * 2):(offset + i * 16 + (j + 1) * 2)])[0]
+      palette = block_data >> 12
+      tile = block_data & 0x3ff
+      attributes = (block_data >> 10) & 0x3
+      up.append((palette, tile, attributes))
+
+    blocks.append((down, up))
+
+  pygame.init()
+  screen = pygame.display.set_mode((300, 1000))
+  screen.fill((255, 255, 255))
+
+  for i in range(0x2d8):
+    x = i % 8
+    y = int(i / 8)
+    draw_block(screen, palettes, tiles, blocks, x * 16, y * 16, i)
+
   pygame.display.flip()
 
   while True:
     event = pygame.event.wait()
     if event.type == pygame.QUIT:
         pygame.quit()
+
+def draw_block(screen, palettes, tiles, blocks, x, y, block_num):
+  (down, up) = blocks[block_num]
+  for i, (palette, tile, attributes) in enumerate(down):
+    x_offset = (i % 2) * 8
+    y_offset = int(i / 2) * 8
+    draw_tile(screen, palettes[palette], tiles[tile],
+      x + x_offset, y + y_offset, attributes, False)
+
+  for i, (palette, tile, attributes) in enumerate(up):
+    x_offset = (i % 2) * 8
+    y_offset = int(i / 2) * 8
+    draw_tile(screen, palettes[palette], tiles[tile],
+      x + x_offset, y + y_offset, attributes, True)
+
+def draw_tile(screen, palette, tile, x, y, attributes, mask_mode):
+  x_flip = attributes & 0x1
+  y_flip = attributes & 0x2
+  for i, px in enumerate(tile):
+    x_offset = (i % 8)
+    if x_flip:
+      x_offset = 8 - (x_offset + 1)
+
+    y_offset = int(i / 8)
+    if y_flip:
+      y_offset = 8 - (y_offset + 1)
+
+    if mask_mode and px == 0:
+      continue
+    colour = palette[px]
+    screen.set_at((x + x_offset, y + y_offset), colour)
 
 def is_pointer(bytes, offset):
   return read_pointer(bytes, offset) > 0
