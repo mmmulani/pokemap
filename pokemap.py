@@ -126,25 +126,16 @@ def draw_tileset(bytes, tileset_pointer):
   offset = read_pointer(bytes, tileset_pointer + 12)
   blocks = []
   for i in range(0x2d8):
-    down = []
-    for j in range(4):
+    block = []
+    for j in range(8):
       block_data = \
         struct.unpack('<H', bytes[(offset + i * 16 + j * 2):(offset + i * 16 + (j + 1) * 2)])[0]
       palette = block_data >> 12
       tile = block_data & 0x3ff
       attributes = (block_data >> 10) & 0x3
-      down.append((palette, tile, attributes))
+      block.append((palette, tile, attributes))
 
-    up = []
-    for j in range(4, 8):
-      block_data = \
-        struct.unpack('<H', bytes[(offset + i * 16 + j * 2):(offset + i * 16 + (j + 1) * 2)])[0]
-      palette = block_data >> 12
-      tile = block_data & 0x3ff
-      attributes = (block_data >> 10) & 0x3
-      up.append((palette, tile, attributes))
-
-    blocks.append((down, up))
+    blocks.append(block)
 
   pygame.init()
   screen = pygame.display.set_mode((300, 1000))
@@ -163,18 +154,15 @@ def draw_tileset(bytes, tileset_pointer):
         pygame.quit()
 
 def draw_block(screen, palettes, tiles, blocks, x, y, block_num):
-  (down, up) = blocks[block_num]
-  for i, (palette, tile, attributes) in enumerate(down):
+  # The first four tiles are the bottom tiles and the last four are the top
+  # ones. The top tiles also have a mask to them, so we have to draw them
+  # differently.
+  block = blocks[block_num]
+  for i, (palette, tile, attributes) in enumerate(block):
     x_offset = (i % 2) * 8
-    y_offset = int(i / 2) * 8
+    y_offset = int((i % 4) / 2) * 8
     draw_tile(screen, palettes[palette], tiles[tile],
-      x + x_offset, y + y_offset, attributes, False)
-
-  for i, (palette, tile, attributes) in enumerate(up):
-    x_offset = (i % 2) * 8
-    y_offset = int(i / 2) * 8
-    draw_tile(screen, palettes[palette], tiles[tile],
-      x + x_offset, y + y_offset, attributes, True)
+      x + x_offset, y + y_offset, attributes, i >= 4)
 
 def draw_tile(screen, palette, tile, x, y, attributes, mask_mode):
   x_flip = attributes & 0x1
