@@ -25,13 +25,28 @@ def main():
   bytes = load_rom(args[0])
   strings = load_strings(bytes, '0x3eecfc')
   debug('Found all these strings: {}'.format(strings))
-  banks = find_banks(bytes, '0x3526A8')
+  banks = load_maps(bytes, '0x3526A8')
+
+  offsets = calculate_map_offsets(banks, 3, 0)
+  min_x = min([x for ((m, b), (x, y)) in offsets])
+  min_y = min([y for ((m, b), (x, y)) in offsets])
+  max_x = max([x + banks[m][b]['width'] for ((m, b), (x, y)) in offsets])
+  max_y = max([y + banks[m][b]['height'] for ((m, b), (x, y)) in offsets])
+
+  width = (max_x - min_x) * 16
+  height = (max_y - min_y) * 16
+  x_orig = min_x * 16
+  y_orig = min_y * 16
 
   pygame.init()
+  screen = pygame.display.set_mode((width, height))
+  screen.fill((255, 255, 255))
 
-  for map_ in banks[3]:
-    draw_and_save_map(bytes, map_, strings)
-    pygame.time.wait(1000)
+  for ((m, b), (x, y)) in offsets:
+    draw_map(screen, bytes, banks[m][b]['map_data'], (x - min_x) * 16, (y - min_y) * 16)
+    pygame.display.flip()
+
+  pygame.image.save(screen, 'wholemap.bmp')
 
   pygame.quit()
 
@@ -77,7 +92,7 @@ def load_strings(bytes, hex_offset):
     string += table[char]
   return strings
 
-def find_banks(bytes, hex_offset):
+def load_maps(bytes, hex_offset):
   offset = int(hex_offset, 16)
 
   bank_pointers = []
@@ -92,11 +107,24 @@ def find_banks(bytes, hex_offset):
   for i, bank_pointer in enumerate(bank_pointers):
     offset = bank_pointer
     next_pointer = bank_pointers[i + 1] if (i + 1) < len(bank_pointers) else 0
+    if i == 42:
+      break
 
     maps = []
     while is_pointer(bytes, offset):
-      map_pointer = read_pointer(bytes, offset)
-      maps.append(map_pointer)
+      map_data = read_pointer(bytes, offset)
+      cs = read_connections(bytes, map_data)
+
+      map_pointer = read_pointer(bytes, map_data)
+      width = read_int(bytes, map_pointer)
+      height = read_int(bytes, map_pointer + 4)
+
+      maps.append({
+        'map_data': map_data,
+        'connections': cs,
+        'width': width,
+        'height': height,
+      })
 
       offset = offset + 4
       if offset == next_pointer:
@@ -107,11 +135,29 @@ def find_banks(bytes, hex_offset):
 
   return banks
 
+def read_connections(bytes, map_data):
+  cs = []
+  if not is_pointer(bytes, map_data + 12):
+    return cs
+  connections = read_pointer(bytes, map_data + 12)
+  n_connections = read_int(bytes, connections)
+  offset = read_pointer(bytes, connections + 4)
+  debug('Reading connections at {:#x}'.format(offset))
+  for i in range(n_connections):
+    cs.append({
+      'direction': read_int(bytes, offset),
+      'offset': read_uint(bytes, offset + 4),
+      'map_bank': struct.unpack('<B', bytes[(offset + 8):(offset + 9)])[0],
+      'map_number': struct.unpack('<B', bytes[(offset + 9):(offset + 10)])[0],
+    })
+    offset += 12
+  return cs
+
 def read_map(bytes, header_pointer):
   map_pointer = read_pointer(bytes, header_pointer)
-  label = struct.unpack('<B', bytes[(header_pointer + 20):(header_pointer + 21)])[0]
   width = read_int(bytes, map_pointer)
   height = read_int(bytes, map_pointer + 4)
+  label = struct.unpack('<B', bytes[(header_pointer + 20):(header_pointer + 21)])[0]
   border = read_pointer(bytes, map_pointer + 8)
   tiles_pointer = read_pointer(bytes, map_pointer + 12)
   tileset_pointer = read_pointer(bytes, map_pointer + 16)
@@ -235,7 +281,17 @@ def draw_tile(screen, palette, tile, x, y, attributes, mask_mode):
     colour = palette[px]
     screen.set_at((x + x_offset, y + y_offset), colour)
 
-def draw_and_save_map(bytes, map_, strings):
+def draw_and_save_map(screen, bytes, map_, strings):
+  screen.fill((255, 255, 255))
+
+  label = draw_map(screen, bytes, map_, 0, 0)
+
+  pygame.display.flip()
+
+  name = strings[label - 88]
+  pygame.image.save(screen, 'maps/{}.bmp'.format(name))
+
+def draw_map(screen, bytes, map_, xx, yy):
   (width, height, label, tile_sprites, global_pointer, local_pointer) = read_map(bytes, map_)
   (palettes, tiles, blocks) = read_tileset(bytes, global_pointer)
   (extra_palettes, extra_tiles, extra_blocks) = read_tileset(bytes, local_pointer)
@@ -243,16 +299,56 @@ def draw_and_save_map(bytes, map_, strings):
   tiles.extend(extra_tiles)
   blocks.extend(extra_blocks)
 
-  screen = pygame.display.set_mode((width * 16, height * 16))
-  screen.fill((255, 255, 255))
-
   for (x, y) in tile_sprites:
-    draw_block(screen, palettes, tiles, blocks, x * 16, y * 16, tile_sprites[(x, y)])
+    draw_block(screen, palettes, tiles, blocks, xx + x * 16, yy + y * 16, tile_sprites[(x, y)])
 
-  pygame.display.flip()
+  return label
 
-  name = strings[label - 88]
-  pygame.image.save(screen, 'maps/{}.bmp'.format(name))
+# Returns a set of maps and (x, y) coordinates that the maps should be drawn at.
+# The (x, y) coordinates are specified in blocks, not pixels.
+# Coordinates originate from the top-left of a map.
+def calculate_map_offsets(maps, bank_num, map_num):
+  visited = {}
+  def calculate_helper(map_id, caller_id, caller_offset, direction, offset):
+    if map_id in visited:
+      return []
+    (bank, map_) = map_id
+    (c_bank, c_map) = caller_id
+    width = maps[bank][map_]['width']
+    height = maps[bank][map_]['height']
+    c_width = maps[c_bank][c_map]['width']
+    c_height = maps[c_bank][c_map]['height']
+    visited[map_id] = True
+
+    (caller_x, caller_y) = caller_offset
+    if direction == 0x1: # Down
+      coord = (caller_x + offset, caller_y + c_height)
+    elif direction == 0x2: # Up
+      coord = (caller_x + offset, caller_y - height)
+    elif direction == 0x3: # Left
+      coord = (caller_x - width, caller_y + offset)
+    elif direction == 0x4: # Right
+      coord = (caller_x + c_width, caller_y + offset)
+    elif direction == 0xf: # Special starting value
+      coord = (caller_x, caller_y)
+    else:
+      return []
+
+    coords = [(map_id, coord)]
+    for c in maps[bank][map_]['connections']:
+      coords.extend(calculate_helper(
+        (c['map_bank'], c['map_number']),
+        map_id,
+        coord,
+        c['direction'],
+        c['offset'],
+      ))
+    return coords
+
+  return calculate_helper(
+    (bank_num, map_num),
+    (bank_num, map_num),
+    (0, 0), 0xf, 0)
 
 def is_pointer(bytes, offset):
   return read_pointer(bytes, offset) > 0
@@ -260,6 +356,9 @@ def is_pointer(bytes, offset):
 def read_pointer(bytes, offset):
   load_address = int('0x8000000', 16)
   return read_int(bytes, offset) - load_address
+
+def read_uint(bytes, offset):
+  return struct.unpack(b'<i', bytes[offset:(offset + 4)])[0]
 
 def read_int(bytes, offset):
   return struct.unpack(b'<I', bytes[offset:(offset + 4)])[0]
