@@ -21,10 +21,10 @@ def main():
   args = parser.parse_args()
 
   global DEBUG_MODE
-  if options.verbose:
+  if args.verbose:
     DEBUG_MODE = True
 
-  bytes = load_rom(args[0])
+  bytes = load_rom(args.rom_file)
   strings = load_strings(bytes, '0x3eecfc')
   debug('Found all these strings: {}'.format(strings))
   banks = load_maps(bytes, '0x3526A8')
