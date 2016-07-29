@@ -4,7 +4,7 @@ import nlzss.lzss3
 import pygame
 import struct
 import sys
-from optparse import OptionParser
+import argparse
 
 DEBUG_MODE = False
 def debug(*args, **kwargs):
@@ -12,11 +12,13 @@ def debug(*args, **kwargs):
     print(*args, **kwargs)
 
 def main():
-  parser = OptionParser(usage="usage: %prog pokemon-rom")
-  parser.add_option("-v", "--verbose",
-    help="Print information while running to help debug", action="store_true",
-    dest="verbose")
-  (options, args) = parser.parse_args()
+  parser = argparse.ArgumentParser(description="do a wee bit o' data rippin from a rom")
+  parser.add_argument("-v", "--verbose",
+                      help="Print information while running to help debug", action="store_true",
+                      dest="verbose")
+  parser.add_argument('rom_file', metavar='rom', type=str,
+                       help='a fire red rom')
+  args = parser.parse_args()
 
   global DEBUG_MODE
   if options.verbose:
