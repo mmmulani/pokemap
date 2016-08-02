@@ -5,6 +5,7 @@ import pygame
 import struct
 import sys
 import argparse
+import os
 
 DEBUG_MODE = False
 def debug(*args, **kwargs):
@@ -12,13 +13,25 @@ def debug(*args, **kwargs):
     print(*args, **kwargs)
 
 def main():
+
   parser = argparse.ArgumentParser(description="do a wee bit o' data rippin from a rom")
   parser.add_argument("-v", "--verbose",
                       help="Print information while running to help debug", action="store_true",
                       dest="verbose")
   parser.add_argument('rom_file', metavar='rom', type=str,
                        help='a fire red rom')
+  parser.add_argument("-o","--outfile",
+                      help="Specify the output file name/extension",
+                      action=CheckExt({'png','bmp','jpeg','tga'}),
+                      default='wholemap.bmp')
+  parser.add_argument("--headless",
+                      help="Run the script in headless mode (no gui!)",
+                      action="store_true")
   args = parser.parse_args()
+
+  if args.headless:
+    import os
+    os.environ["SDL_VIDEODRIVER"] = "dummy" #this works on my ubuntu machine, but untested on others.
 
   global DEBUG_MODE
   if args.verbose:
@@ -26,9 +39,8 @@ def main():
 
   bytes = load_rom(args.rom_file)
   strings = load_strings(bytes, '0x3eecfc')
-  debug('Found all these strings: {}'.format(strings))
+  debug('Found all these strings: {}'.format([x.encode('utf-8') for x in strings]))
   banks = load_maps(bytes, '0x3526A8')
-
   offsets = calculate_map_offsets(banks, 3, 0)
   min_x = min([x for ((m, b), (x, y)) in offsets])
   min_y = min([y for ((m, b), (x, y)) in offsets])
@@ -44,11 +56,16 @@ def main():
   screen = pygame.display.set_mode((width, height))
   screen.fill((255, 255, 255))
 
+  if args.headless:
+    print("Working!...")
+
   for ((m, b), (x, y)) in offsets:
     draw_map(screen, bytes, banks[m][b]['map_data'], (x - min_x) * 16, (y - min_y) * 16)
     pygame.display.flip()
 
-  pygame.image.save(screen, 'wholemap.bmp')
+  pygame.image.save(screen, args.outfile)
+  if args.headless:
+    print("done!")
 
   pygame.quit()
 
@@ -364,6 +381,18 @@ def read_uint(bytes, offset):
 
 def read_int(bytes, offset):
   return struct.unpack(b'<I', bytes[offset:(offset + 4)])[0]
+
+def CheckExt(choices):
+  class Act(argparse.Action):
+      def __call__(self,parser,namespace,fname,option_string=None):
+          ext = os.path.splitext(fname)[1][1:]
+          if ext not in choices:
+              option_string = '({})'.format(option_string) if option_string else ''
+              parser.error("file doesn't end with one of {}{}".format(choices,option_string))
+          else:
+              setattr(namespace,self.dest,fname)
+
+  return Act
 
 if __name__ == '__main__':
   main()
