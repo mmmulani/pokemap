@@ -54,7 +54,8 @@ def main():
 
   pygame.init()
   screen = pygame.display.set_mode((width, height))
-  screen.fill((255, 255, 255))
+  screen.fill((255, 0, 255))
+  screen.set_colorkey((255, 0, 255))
 
   if args.headless:
     print("Working!...")
@@ -63,6 +64,7 @@ def main():
     draw_map(screen, bytes, banks[m][b]['map_data'], (x - min_x) * 16, (y - min_y) * 16)
     pygame.display.flip()
 
+  screen = screen.convert_alpha()
   pygame.image.save(screen, args.outfile)
   if args.headless:
     print("done!")
